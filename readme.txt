@@ -1,14 +1,10 @@
 === WP Document Revisions ===
-
-=== WP Document Revisions ===
-**Contributors:** benbalter  
-**Donate link:** http://ben.balter.com/donate/  
-**Tags:** documents, uploads, attachments, document management, enterprise, version control, revisions, collaboration, journalism, government, files, revision log, document management, intranet, digital asset management, dam  
-**Requires at least:** 3.2  
-**Tested up to:** 3.5   
-**Stable tag:** 1.3.4
-
-[![Build Status](https://secure.travis-ci.org/benbalter/WP-Document-Revisions.png?branch=master)](http://travis-ci.org/benbalter/WP-Document-Revisions)
+Contributors: benbalter  
+Donate link: http://ben.balter.com/donate/  
+Tags: documents, uploads, attachments, document management, enterprise, version control, revisions, collaboration, journalism, government, files, revision log, document management, intranet, digital asset management, dam  
+Requires at least: 3.2  
+Tested up to: 3.6   
+Stable tag: 1.3.6
 
 A document management and version control plugin that allows teams of any size to collaboratively edit files and manage their workflow.
 
@@ -78,6 +74,10 @@ A document management and version control plugin that allows teams of any size t
 * German -[Konstantin Obenland](http://en.wp.obenland.it/)
 * Chinese - Tim Ren
 * Swedish - Daniel Kroon, [Examinare AB](http://www.examinare.biz/), Sweden.
+* Czech - Hynek Šťavík
+* Italian - @guterboit
+* Russian - Evgeny Vlasov
+* Dutch - @tijscruysen
 
 *WP Document Revisions was developed by a [law student and a business student](http://ben.balter.com) with a [grant from Google](http://code.google.com/soc/), and in close coordination with and under the watchful eye of WordPress.org's lead developers (Although neither relationship should imply an endorsement). Special thanks to Jon Cave, Aaron Jorbin, Mitcho Erlewine, and Andrew Nacin for their guidance.*
 
@@ -109,6 +109,22 @@ Please see (and feel free to contribute to) the [Frequently Asked Questions Wiki
 
 
 == Changelog ==
+
+= 1.3.6 =
+* Added Italian translation, props @guterboit
+* Added Russian translation, props Evgeny Vlasov
+* Updated all translations
+* Workflow state saving improvements, props @cojennin ([#48](https://github.com/benbalter/WP-Document-Revisions/pull/48))
+* Fix restore revision link bug, props @cojennin ([#55](https://github.com/benbalter/WP-Document-Revisions/issues/55))
+* Welcome @cojennin to the core team. [Want to join?](https://github.com/benbalter/WP-Document-Revisions/wiki/How-to-Contribute)
+
+= 1.3.5 =
+* Added Dutch translation, props @tijscruysen.
+* To prevent potential errors, verify `workflow_state` is set before checking for change, props @rachelbaker.
+* Added `document_custom_feed` and `document_verify_feed_key` filters to customize feed behavior, props @nodakjones.
+* Prevent errors when newly added documents do not have attached files, props @rachelbaker.
+* Better compatibility with WordPress 3.5 media uploader
+* Significant Javascript improvements to prevent conflicts with other plugins
 
 = 1.3.4 =
 * Testing framework no longer distributed with the plugin.

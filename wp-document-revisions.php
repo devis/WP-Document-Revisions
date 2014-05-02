@@ -3,7 +3,7 @@
 Plugin Name: WP Document Revisions
 Plugin URI: http://ben.balter.com/2011/08/29/wp-document-revisions-document-management-version-control-wordpress/
 Description: A document management and version control plugin for WordPress that allows teams of any size to collaboratively edit files and manage their workflow.
-Version: 1.3.4
+Version: 1.3.6
 Author: Benjamin J. Balter
 Author URI: http://ben.balter.com
 License: GPL3
@@ -31,16 +31,19 @@ License: GPL3
  *
  *  @copyright 2011-2012
  *  @license GPL v3
- *  @version 1.3.4
+ *  @version 1.3.6
  *  @package WP_Document_Revisions
  *  @author Benjamin J. Balter <ben@balter.com>
  */
 
-class Document_Revisions {
+set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__) . '/includes');
+require_once "HTTP/WebDAV/Server.php";
+
+class Document_Revisions extends HTTP_WebDAV_Server {
 	static $instance;
 	static $key_length = 32;
 	static $meta_key   = 'document_revisions_feed_key';
-	public $version = '1.3.4';
+	public $version = '1.3.6';
 
 	/**
 	 * Initiates an instance of the class and adds hooks
@@ -68,6 +71,8 @@ class Document_Revisions {
 		add_action( 'post_type_link', array(&$this, 'permalink'), 10, 4 );
 		add_action( 'post_link', array(&$this, 'permalink'), 10, 4 );
 		add_filter( 'template_include', array(&$this, 'serve_file'), 10, 1 );
+		add_action( 'after_setup_theme', array(&$this, 'auth_webdav_requests'));
+		add_action( 'template_redirect', array(&$this, 'check_webdav_requests'));
 		add_filter( 'serve_document_auth', array( &$this, 'serve_document_auth'), 10, 3 );
 		add_action( 'parse_request', array( &$this, 'ie_cache_fix' ) );
 		add_filter( 'query_vars', array(&$this, 'add_query_var'), 10, 4 );
@@ -106,8 +111,164 @@ class Document_Revisions {
 		include dirname( __FILE__ ) . '/includes/front-end.php';
 		new Document_Revisions_Front_End( $this );
 
+		//parent::ServeRequest();
 	}
 
+
+	###################################################
+	#
+	# Support some basic WebDav requests
+	#
+	###################################################
+
+	function auth_webdav_requests($post) {
+		$request_method = $_SERVER['REQUEST_METHOD'];
+
+		if ($request_method == 'OPTIONS') {
+			nocache_headers();
+			parent::http_OPTIONS();
+			status_header( 200 );
+			die();
+		}
+		$webdav_methods = array( "PROPFIND", "LOCK", "UNLOCK", "PUT", "DELETE" );
+		$private_checked_methods = array( "GET", "HEAD" );
+
+		if ( in_array( $request_method, $webdav_methods ) || ( in_array( $request_method, $private_checked_methods ) && $this->is_webdav_client() ) ) {
+			$this->basic_auth();
+		}
+	}
+
+	function is_webdav_client() {
+		$client = $_SERVER['HTTP_USER_AGENT'];
+		if ( strpos( $client, 'Office' ) !== false ) {
+			return true;
+		}
+		if ( strpos( $client, 'DAV' ) !== false ) {
+			return true;
+		}
+		if ( strpos( $client, 'cadaver' ) !== false ) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Check for WebDav request types and handle them
+	 */
+	function check_webdav_requests() {
+		global $post;
+		error_log("POST: " . $post->ID);
+
+		$request_method = $_SERVER['REQUEST_METHOD'];
+		switch ( $request_method ) {
+			case "LOCK":
+				if ( current_user_can( 'edit_post', $post->ID ) ) {
+					$this->do_LOCK();
+				} else {
+					nocache_headers();
+					status_header ( 403 );
+					die();
+				}
+				break;
+			case "PUT":
+				if ( current_user_can( 'edit_post', $post->ID ) ) {
+					$this->do_PUT();
+
+				} else {
+					nocache_headers();
+					status_header ( 403 );
+					die();
+				}
+				break;
+		}
+	}
+
+	/**
+	 * Do basic authentication
+	 */
+    function basic_auth() {
+        nocache_headers();
+        if ( is_user_logged_in() ) {
+			error_log("Already logged in..");
+            return;
+		}
+
+        $usr = isset($_SERVER['PHP_AUTH_USER']) ? $_SERVER['PHP_AUTH_USER'] : '';
+        $pwd = isset($_SERVER['PHP_AUTH_PW'])   ? $_SERVER['PHP_AUTH_PW']   : '';
+        if (empty($usr) && empty($pwd) && isset($_SERVER['HTTP_AUTHORIZATION']) && $_SERVER['HTTP_AUTHORIZATION']) {
+            list($type, $auth) = explode(' ', $_SERVER['HTTP_AUTHORIZATION']);
+            if (strtolower($type) === 'basic') {
+                list($usr, $pwd) = explode(':', base64_decode($auth));
+            }
+        }
+		$creds = array();
+		$creds['user_login'] = $usr;
+		$creds['user_password'] = $pwd;
+		$creds['remember'] = false;
+		$login = wp_signon($creds, false);
+        if ( !is_wp_error( $login ) ) {
+			error_log("YAY! Logged in!");
+			$current_user = wp_set_current_user($login);
+            return;
+		}
+
+        header('WWW-Authenticate: Basic realm="Please Enter Your Password"');
+        status_header ( 401 );
+        echo 'Authorization Required';
+        die();
+    }
+
+
+	/**
+	 * Check for lock on document
+	 */
+	function do_LOCK() {
+		global $post;
+		if ($post) {
+			$current_user = wp_get_current_user();
+			error_log('Current User: ' . $current_user->ID);
+
+			include_once "wp-admin/includes/post.php";
+			$current_owner = wp_check_post_lock( $post->ID );
+			error_log('Current Owner: ' . $current_owner);
+			if ( $current_owner && $current_owner != $current_user->ID ) {
+				nocache_headers();
+				status_header ( 423 );
+				die();
+			}
+			nocache_headers();
+			//header("Lock-Token: " . md5($current_owner));
+			parent::http_LOCK();
+		} else {
+			error_log("NO POST!");
+			nocache_headers();
+			status_header ( 404 );
+			die();
+		}
+	}
+
+	function do_PUT() {
+		global $post;
+
+		/* PUT data comes in on the stdin stream */
+		$putdata = fopen("php://input", "r");
+
+		/* Open a file for writing */
+		$fp = fopen("/tmp/myputfile.ext", "w");
+
+		/* Read the data 1 KB at a time
+		   and write to the file */
+		while ($data = fread($putdata, 1024))
+		  fwrite($fp, $data);
+
+		/* Close the streams */
+		fclose($fp);
+		fclose($putdata);
+
+		nocache_headers();
+		status_header( 500 );
+		die();
+	}
 
 	/**
 	 * Init i18n files
@@ -369,7 +530,13 @@ class Document_Revisions {
 		if ( get_post_type( $post ) == 'attachment' )
 			$attachment = $post;
 		else if ( get_post_type( $post ) == 'document' )
-				$attachment = get_post( $this->get_latest_revision( $post->ID )->post_content );
+				$latest_revision = $this->get_latest_revision( $post->ID );
+
+				// verify a previous revision exists
+				if ( !$latest_revision )
+					return '';
+
+				$attachment = get_post( $latest_revision->post_content );
 
 			//sanity check in case post_content somehow doesn't represent an attachment,
 			// or in case some sort of non-document, non-attachment object/ID was passed
@@ -743,18 +910,18 @@ class Document_Revisions {
 		// "attachment" -- force save-as dialog to pop up when file is downloaded (pre 1.3.1 default)
 		// "inline" -- attempt to open in browser (e.g., PDFs), if not possible, prompt with save as (1.3.1+ default)
 		$disposition = ( apply_filters( 'document_content_disposition_inline', true ) ) ? 'inline' : 'attachment';
-		header( 'Content-Disposition: ' . $disposition . '; filename="' . $filename . '"' );
+		@header( 'Content-Disposition: ' . $disposition . '; filename="' . $filename . '"' );
 
 		//filetype and length
-		header( 'Content-Type: ' . $mimetype ); // always send this
-		header( 'Content-Length: ' . filesize( $file ) );
+		@header( 'Content-Type: ' . $mimetype ); // always send this
+		@header( 'Content-Length: ' . filesize( $file ) );
 
 		//modified
 		$last_modified = gmdate( 'D, d M Y H:i:s', filemtime( $file ) );
 		$etag = '"' . md5( $last_modified ) . '"';
-		header( "Last-Modified: $last_modified GMT" );
-		header( 'ETag: ' . $etag );
-		header( 'Expires: ' . gmdate( 'D, d M Y H:i:s', time() + 100000000 ) . ' GMT' );
+		@header( "Last-Modified: $last_modified GMT" );
+		@header( 'ETag: ' . $etag );
+		@header( 'Expires: ' . gmdate( 'D, d M Y H:i:s', time() + 100000000 ) . ' GMT' );
 
 		// Support for Conditional GET
 		$client_etag = isset( $_SERVER['HTTP_IF_NONE_MATCH'] ) ? stripslashes( $_SERVER['HTTP_IF_NONE_MATCH'] ) : false;
@@ -1087,13 +1254,16 @@ class Document_Revisions {
 
 	/**
 	 * Intercepts RSS feed redirect and forces our custom feed
+	 *
+	 * Note: Use `add_filter( 'document_custom_feed', '__return_false' )` to shortcircuit
+	 *
 	 * @since 0.5
 	 * @param string $default the original feed
 	 * @return string the slug for our feed
 	 */
 	function hijack_feed( $default ) {
 
-		if ( !$this->verify_post_type() )
+		if ( !$this->verify_post_type() || !apply_filters( 'document_custom_feed', true ) )
 			return $default;
 
 		return 'revision_log';
@@ -1103,17 +1273,18 @@ class Document_Revisions {
 
 	/**
 	 * Verifies that users are auth'd to view a revision feed
+	 *
+	 * Note: Use `add_filter( 'document_verify_feed_key', '__return_false' )` to shortcircuit
+	 *
 	 * @since 0.5
 	 */
 	function revision_feed_auth() {
-		global $wpdb;
 
-		if ( !$this->verify_post_type() )
+		if ( !$this->verify_post_type() || !apply_filters( 'document_verify_feed_key', true ) )
 			return;
 
 		if ( is_feed() && !$this->validate_feed_key() )
-			wp_die( __( 'Sorry, this is a private feed.', 'wp-document-revisions' ) );
-
+				wp_die( __( 'Sorry, this is a private feed.', 'wp-document-revisions' ) );
 
 	}
 
